@@ -2,25 +2,19 @@
   "id": "xyyt-wxmerchanttransfer",
   "displayName": "微信商家转账提现·用户确认收款（uni-app 鸿蒙 HarmonyOS NEXT）",
   "version": "1.0.0",
-  "description": "uni-app 鸿蒙（HarmonyOS NEXT）端微信商家转账/提现的用户确认收款：调起微信确认收款页面（requestMerchantTransfer），并回传用户确认结果（success/fail/cancel）。补位官方 uni-requestMerchantTransfer 缺失的鸿蒙实现，调起字段与官方 API 一致，可直接作为鸿蒙分支替换使用。注：本插件只覆盖提现流程中「用户确认收款」环节，发起转账仍需后端调用微信支付商家转账接口。",
+  "description": "uni-app 鸿蒙（HarmonyOS NEXT）端微信商家转账的用户确认收款：调起微信确认收款页并回传用户确认结果；仅覆盖确认收款环节，发起转账仍需后端调用微信支付接口。",
   "keywords": [
-    "提现",
+    "微信提现",
     "提现到零钱",
     "确认收款",
-    "商家转账",
-    "企业付款",
-    "requestMerchantTransfer",
     "微信",
-    "鸿蒙",
-    "HarmonyOS",
-    "uni-app",
-    "UTS"
-  ],
+    "鸿蒙"
+],
   "repository": "https://github.com/xyytwz/uni-wxmerchanttransfer",
   "engines": {
-    "HBuilderX": ">=4.31",
-    "uni-app": "^3.1.0",
-    "uni-app-x": "^3.1.0"
+    "HBuilderX": "^4.31",
+    "uni-app": "^4.31",
+    "uni-app-x": ""
   },
   "dcloudext": {
     "type": "uts",
@@ -33,7 +27,7 @@
       }
     },
     "contact": {
-      "qq": ""
+      "qq": "273714068"
     },
     "declaration": {
       "ads": "无",
@@ -44,7 +38,7 @@
     "darkmode": "x",
     "i18n": "x",
     "widescreen": "x",
-    "vapor": "-"
+    "vapor": "x"
   },
   "uni_modules": {
     "dependencies": [],
@@ -58,35 +52,41 @@
       "client": {
         "uni-app": {
           "vue": {
-            "vue2": "-",
-            "vue3": "y"
+            "vue2": "x",
+            "vue3": {
+                "extVersion": "1.0.0",
+                "minVersion": ""
+            }
           },
           "web": {
-            "safari": "-",
-            "chrome": "-"
+            "safari": "x",
+            "chrome": "x"
           },
           "app": {
-            "vue": "-",
-            "nvue": "-",
-            "android": "-",
-            "ios": "-",
-            "harmony": "y"
+            "vue": "x",
+            "nvue": "x",
+            "android": "x",
+            "ios": "x",
+            "harmony": {
+                "extVersion": "1.0.0",
+                "minVersion": "12"
+            }
           },
           "mp": {
-            "weixin": "-",
-            "alipay": "-",
-            "toutiao": "-",
-            "baidu": "-",
-            "kuaishou": "-",
-            "jd": "-",
-            "harmony": "-",
-            "qq": "-",
-            "lark": "-",
-            "xhs": "-"
+            "weixin": "x",
+            "alipay": "x",
+            "toutiao": "x",
+            "baidu": "x",
+            "kuaishou": "x",
+            "jd": "x",
+            "harmony": "x",
+            "qq": "x",
+            "lark": "x",
+            "xhs": "x"
           },
           "quickapp": {
-            "huawei": "-",
-            "union": "-"
+            "huawei": "x",
+            "union": "x"
           }
         },
         "uni-app-x": {
