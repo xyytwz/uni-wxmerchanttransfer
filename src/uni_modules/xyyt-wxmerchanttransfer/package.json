@@ -1,0 +1,102 @@
+{
+  "id": "xyyt-wxmerchanttransfer",
+  "displayName": "微信商家转账确认收款（uni-app 鸿蒙 HarmonyOS NEXT）",
+  "version": "1.0.0",
+  "description": "鸿蒙（HarmonyOS NEXT）端微信商家转账用户确认收款：调起微信确认收款页面（requestMerchantTransfer），并回传用户确认结果（success/fail/cancel）。补位官方 uni-requestMerchantTransfer 缺失的鸿蒙实现，调起字段与官方 API 一致。因鸿蒙 UTS 插件无生命周期代理，需在宿主 EntryAbility 转发微信回跳 Want，文档含集成示例与 demo 工程。",
+  "keywords": [
+    "确认收款",
+    "商家转账",
+    "requestMerchantTransfer",
+    "微信",
+    "鸿蒙",
+    "uni-app",
+    "UTS"
+  ],
+  "repository": "https://github.com/xyytwz/xyyt-wxmerchanttransfer",
+  "engines": {
+    "HBuilderX": "^4.23"
+  },
+  "dcloudext": {
+    "type": "uts",
+    "sale": {
+      "regular": {
+        "price": "0.00"
+      },
+      "sourcecode": {
+        "price": "0.00"
+      }
+    },
+    "contact": {
+      "qq": ""
+    },
+    "declaration": {
+      "ads": "无",
+      "data": "插件不采集任何用户数据；调起微信确认收款页面需宿主已配置微信开放平台能力",
+      "permissions": "无新增系统权限；需宿主 module.json5 配置 querySchemes: [\"weixin\"]"
+    },
+    "npmurl": "",
+    "darkmode": "x",
+    "i18n": "x",
+    "widescreen": "x"
+  },
+  "uni_modules": {
+    "dependencies": [],
+    "encrypt": [],
+    "platforms": {
+      "cloud": {
+        "tcb": "x",
+        "aliyun": "x",
+        "alipay": "x"
+      },
+      "client": {
+        "uni-app": {
+          "vue": {
+            "vue2": "-",
+            "vue3": "y"
+          },
+          "web": {
+            "safari": "-",
+            "chrome": "-"
+          },
+          "app": {
+            "vue": "-",
+            "nvue": "-",
+            "android": "-",
+            "ios": "-",
+            "harmony": "y"
+          },
+          "mp": {
+            "weixin": "-",
+            "alipay": "-",
+            "toutiao": "-",
+            "baidu": "-",
+            "kuaishou": "-",
+            "jd": "-",
+            "harmony": "-",
+            "qq": "-",
+            "lark": "-",
+            "xhs": "-"
+          },
+          "quickapp": {
+            "huawei": "-",
+            "union": "-"
+          }
+        },
+        "uni-app-x": {
+          "web": {
+            "safari": "-",
+            "chrome": "-"
+          },
+          "app": {
+            "android": "-",
+            "ios": "-",
+            "harmony": "y"
+          },
+          "mp": {
+            "weixin": "-"
+          }
+        }
+      }
+    }
+  }
+}

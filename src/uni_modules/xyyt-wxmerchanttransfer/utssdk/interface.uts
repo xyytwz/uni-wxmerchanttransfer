@@ -1,0 +1,91 @@
+/**
+ * xyyt-wxmerchanttransfer 跨平台接口声明
+ *
+ * 调起字段与官方 uni.requestMerchantTransfer 保持一致（见官方插件 utssdk/interface.uts），
+ * 额外提供鸿蒙端"用户确认结果"的回调/查询 API（官方插件仅回调调起结果，不回传用户确认结果）。
+ */
+
+/** 调起微信确认收款页面（对齐官方 requestMerchantTransfer 签名） */
+export type RequestMerchantTransfer = (options: RequestMerchantTransferOptions) => void;
+
+export type RequestMerchantTransferOptions = {
+	/**
+	 * 微信支付商户号
+	 */
+	mchId: string,
+	/**
+	 * 微信开放平台移动应用 AppID（宿主 App 的微信 appId）
+	 */
+	appId: string,
+	/**
+	 * 转账单据返回的 package_info（仅当单据状态为 WAIT_USER_CONFIRM 待收款用户确认时由后端返回）
+	 */
+	package: string,
+	/**
+	 * 用户在微信开放平台 appid 下的唯一标识，可选
+	 */
+	openId?: string | null,
+	/**
+	 * 服务商模式下微信支付分配的子商户 appid，可选
+	 */
+	subAppId?: string | null,
+	/**
+	 * 服务商模式下微信支付分配的子商户号，可选
+	 */
+	subMchId?: string | null,
+	/**
+	 * 调起成功（微信确认收款页面拉起意图已发出）回调；注意：仅代表页面拉起成功，不代表用户确认成功
+	 */
+	success?: RequestMerchantTransferSuccessCallback | null,
+	/**
+	 * 调起失败回调（未安装微信/微信版本过低/参数缺失/SDK 发送失败）
+	 */
+	fail?: RequestMerchantTransferFailCallback | null,
+	/**
+	 * 调起结束回调（无论成败均触发）
+	 */
+	complete?: RequestMerchantTransferCompleteCallback | null
+}
+
+export type RequestMerchantTransferGeneralCallbackResult = {
+	errMsg: string
+}
+
+export type RequestMerchantTransferSuccessCallback = (
+	res: RequestMerchantTransferGeneralCallbackResult
+) => void
+
+export type RequestMerchantTransferFailCallback = (
+	res: RequestMerchantTransferGeneralCallbackResult
+) => void
+
+export type RequestMerchantTransferCompleteCallback = (
+	res: RequestMerchantTransferGeneralCallbackResult
+) => void
+
+/**
+ * 【鸿蒙增强】注册一次性"用户确认结果"回调。
+ * 微信回跳宿主后触发；每次触发后自动注销，需再次接收请重新注册。
+ */
+export type OnMerchantTransferResult = (callback: MerchantTransferResultCallback) => void;
+
+/** 注销未触发的结果回调 */
+export type OffMerchantTransferResult = () => void;
+
+/**
+ * 用户确认结果。
+ * result 取值：success（微信确认收款页面展示成功，不代表确认成功，到账以列表/订单接口为准）| fail | cancel
+ */
+export type MerchantTransferResult = {
+	result: string,
+	/** 微信回传的 extMsg 原始 JSON 字符串，如 {"result":"success"} */
+	errMsg: string
+}
+
+export type MerchantTransferResultCallback = (res: MerchantTransferResult) => void;
+
+/** 获取最近一次用户确认结果（轮询式备用读取），无结果返回 null */
+export type GetLastMerchantTransferResult = () => MerchantTransferResult | null;
+
+/** 清除最近一次用户确认结果缓存 */
+export type ClearMerchantTransferResult = () => void;

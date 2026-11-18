@@ -1,0 +1,205 @@
+/**
+ * xyyt-wxmerchanttransfer
+ * 微信商家转账用户确认收款（WXOpenBusinessView / requestMerchantTransfer）鸿蒙实现
+ *
+ * 依赖：@tencent/wechat_open_sdk（见同目录 config.json），要求微信客户端 >= 8.0.11.34
+ * 宿主集成（必读）：
+ *  1. 宿主 module.json5 配置 querySchemes: ["weixin"]（微信回跳宿主的 scheme 白名单）
+ *  2. EntryAbility.onCreate / onNewWant 中调用 handleWeChatWant(want)，把微信回跳的 Want 交给插件分发
+ *     ——鸿蒙 UTS 插件无应用生命周期代理（官方文档：鸿蒙平台"不涉及" HookProxy 章节），
+ *        Want 分发必须由宿主转发，这是本插件区别于 Android/iOS 实现的集成步骤。
+ *  3. 与宿主已集成的其他微信能力（oauth 登录等）可共存：各自 handleWant 各自处理认识的 resp 类型。
+ *
+ * 已验证环境：uni-app（vue3）+ 自定义原生壳工程（DevEco）+ @tencent/wechat_open_sdk 1.0.23 真机通过。
+ */
+import * as wxopensdk from '@tencent/wechat_open_sdk'
+import Want from '@ohos.app.ability.Want'
+import { common } from '@kit.AbilityKit'
+import {
+	RequestMerchantTransfer,
+	RequestMerchantTransferOptions,
+	RequestMerchantTransferGeneralCallbackResult,
+	MerchantTransferResult,
+	MerchantTransferResultCallback,
+	OnMerchantTransferResult,
+	OffMerchantTransferResult,
+	GetLastMerchantTransferResult,
+	ClearMerchantTransferResult
+} from '../interface.uts'
+
+const TRANSFER_BUSINESS_TYPE = 'requestMerchantTransfer'
+const TAG = 'xyyt-wxmerchanttransfer'
+
+/** WXApi 单例（按 appId 缓存创建，避免每次调用重复 createWXAPI） */
+let _wxApi: wxopensdk.WXApi | null = null
+let _wxApiAppId = ''
+/** 一次性结果回调（微信回跳 onResp 时触发并自动注销） */
+let _pendingResultCallback: MerchantTransferResultCallback | null = null
+/** 最近一次结果缓存（供轮询式读取） */
+let _lastResult: MerchantTransferResult | null = null
+
+class TransferEventHandler implements wxopensdk.WXApiEventHandler {
+	onReq(req: wxopensdk.BaseReq): void {
+	}
+
+	onResp(resp: wxopensdk.BaseResp): void {
+		if (resp instanceof wxopensdk.OpenBusinessViewResp) {
+			const transferResp = resp as wxopensdk.OpenBusinessViewResp
+			if (transferResp.businessType === TRANSFER_BUSINESS_TYPE) {
+				const extMsg = transferResp.extMsg ?? ''
+				console.info(TAG + ' onResp extMsg: ' + extMsg)
+				const parsed = parseTransferResult(extMsg)
+				_lastResult = parsed
+				const cb = _pendingResultCallback
+				_pendingResultCallback = null
+				if (cb != null) {
+					try {
+						cb(parsed)
+					} catch (e) {
+						console.error(TAG + ' result callback error: ' + JSON.stringify(e))
+					}
+				}
+			}
+		}
+	}
+}
+
+const _eventHandler = new TransferEventHandler()
+
+/**
+ * 解析微信回传 extMsg（格式 {"result":"success|fail|cancel"}）。
+ * 用字符串特征判断避免 UTS/ArkTS 下 JSON.parse 的类型差异，errMsg 透传原始 extMsg。
+ */
+function parseTransferResult(extMsg: string): MerchantTransferResult {
+	let result = 'fail'
+	if (extMsg.indexOf('"success"') != -1) {
+		result = 'success'
+	} else if (extMsg.indexOf('"cancel"') != -1) {
+		result = 'cancel'
+	}
+	const res: MerchantTransferResult = {
+		result: result,
+		errMsg: extMsg
+	}
+	return res
+}
+
+/**
+ * 按需创建 WXApi 单例；appId 传 '' 表示沿用上次创建时的 appId。
+ */
+function ensureWxApi(appId: string): boolean {
+	const id = appId != '' ? appId : _wxApiAppId
+	if (id == '') {
+		return false
+	}
+	if (_wxApi == null || (appId != '' && appId != _wxApiAppId)) {
+		_wxApi = wxopensdk.WXAPIFactory.createWXAPI(id)
+		_wxApiAppId = id
+	}
+	return _wxApi != null
+}
+
+function notifyResult(options: RequestMerchantTransferOptions, ok: boolean, errMsg: string): void {
+	const res: RequestMerchantTransferGeneralCallbackResult = { errMsg: errMsg }
+	if (ok) {
+		try {
+			options.success?.(res)
+		} catch (e) {
+			console.error(TAG + ' success callback error: ' + JSON.stringify(e))
+		}
+	} else {
+		try {
+			options.fail?.(res)
+		} catch (e) {
+			console.error(TAG + ' fail callback error: ' + JSON.stringify(e))
+		}
+	}
+	try {
+		options.complete?.(res)
+	} catch (e) {
+		console.error(TAG + ' complete callback error: ' + JSON.stringify(e))
+	}
+}
+
+/** 发送请求并回调调起结果（async helper，await 模式已验证） */
+async function sendTransferReq(
+	context: common.UIAbilityContext,
+	wxApi: wxopensdk.WXApi,
+	req: wxopensdk.OpenBusinessViewReq,
+	options: RequestMerchantTransferOptions
+): Promise<void> {
+	try {
+		const ok = await wxApi.sendReq(context, req)
+		console.info(TAG + ' sendReq result: ' + ok)
+		notifyResult(options, ok, ok ? 'requestMerchantTransfer:ok' : 'requestMerchantTransfer:fail')
+	} catch (err) {
+		console.error(TAG + ' sendReq failed: ' + JSON.stringify(err))
+		notifyResult(options, false, 'requestMerchantTransfer:fail ' + JSON.stringify(err))
+	}
+}
+
+/**
+ * 调起微信确认收款页面。
+ * success 仅代表页面拉起成功；用户确认结果通过 onMerchantTransferResult 接收
+ * （或 getLastMerchantTransferResult 轮询读取）。
+ */
+export const requestMerchantTransfer: RequestMerchantTransfer = function (options: RequestMerchantTransferOptions): void {
+	if (!ensureWxApi(options.appId)) {
+		notifyResult(options, false, 'appId 不能为空')
+		return
+	}
+	const wxApi = _wxApi!
+	if (!wxApi.isWXAppInstalled()) {
+		notifyResult(options, false, '未安装微信或微信版本过低，请安装/升级微信后重试')
+		return
+	}
+	// query 组装对齐官方 android 实现：mchId/package/appId 必填，其余可选（均需 UrlEncode）
+	let query = 'mchId=' + encodeURIComponent(options.mchId)
+	query += '&package=' + encodeURIComponent(options.package)
+	query += '&appId=' + encodeURIComponent(options.appId)
+	if (options.openId != null && options.openId != '') {
+		query += '&openId=' + encodeURIComponent(options.openId!)
+	}
+	if (options.subAppId != null && options.subAppId != '') {
+		query += '&subAppId=' + encodeURIComponent(options.subAppId!)
+	}
+	if (options.subMchId != null && options.subMchId != '') {
+		query += '&subMchId=' + encodeURIComponent(options.subMchId!)
+	}
+	const req = new wxopensdk.OpenBusinessViewReq()
+	req.businessType = TRANSFER_BUSINESS_TYPE
+	req.query = query
+	console.info(TAG + ' requestMerchantTransfer query: ' + query)
+	// 清理上次残留，等待微信回跳
+	_lastResult = null
+	const context = getContext() as common.UIAbilityContext
+	sendTransferReq(context, wxApi, req, options)
+}
+
+export const onMerchantTransferResult: OnMerchantTransferResult = function (callback: MerchantTransferResultCallback): void {
+	_pendingResultCallback = callback
+}
+
+export const offMerchantTransferResult: OffMerchantTransferResult = function (): void {
+	_pendingResultCallback = null
+}
+
+export const getLastMerchantTransferResult: GetLastMerchantTransferResult = function (): MerchantTransferResult | null {
+	return _lastResult
+}
+
+export const clearMerchantTransferResult: ClearMerchantTransferResult = function (): void {
+	_lastResult = null
+}
+
+/**
+ * 【宿主集成】在 EntryAbility.onCreate / onNewWant 中调用，把微信回跳的 Want 交给插件分发。
+ * @param want 微信回跳的 Want
+ * @param appId 可选；若在首次调起前发生回跳（极少），可用此 appId 提前建立 WXApi
+ */
+export function handleWeChatWant(want: Want, appId?: string): boolean {
+	if (!ensureWxApi(appId ?? '')) {
+		return false
+	}
+	return _wxApi!.handleWant(want, _eventHandler)
+}
