@@ -27,6 +27,8 @@ npm install
 npm run dev:app-harmony     # 或 npx uni build -p app-harmony，再导入 HBuilderX / DevEco Studio
 ```
 
+> 上面只是编出鸿蒙工程。要真跑通确认收款，还得在生成的 `dist/dev/app-harmony/entry/src/main/module.json5` 里补齐下节的**两项**宿主配置。本仓库不代做这一步：`harmony-configs/` 是 HBuilderX 独有机制（cli 工具链无此概念），而产物目录会被重建冲刷 —— 请把你实际使用的鸿蒙工程纳入自己的版本管理。
+
 ## 宿主配置：module.json5 两项，缺一不可
 
 微信的「拉起」与「回跳」分属两条通道，各需一个声明。**注意两项在 JSON 里的层级不同**：`querySchemes` 在 `module` 节点下，`actions` 必须嵌在 `abilities[].skills[]` 内。
@@ -55,7 +57,7 @@ npm run dev:app-harmony     # 或 npx uni build -p app-harmony，再导入 HBuil
 | `querySchemes` | 报「未安装微信或微信版本过低」（实为 `canOpenLink` 抛 17700056 被 SDK 吞成 false） |
 | `wxentity.action.open` | **拉起一切正常**，但确认结果永远取不到（回调不触发、轮询恒为 `null`） |
 
-两项均编译进 HAP，**改完必须重新构建并安装**，WGT 热更新与替换 `www` 无效；建议解包 HAP 确认已生效。工程形态上的落地差异（HBuilderX 工程走 `harmony-configs/` 整体覆盖，cli / 自维护工程直接改源文件并注意构建脚本是否会重新生成）见插件 [`readme.md` 2.2`](src/uni_modules/xyyt-wxmerchanttransfer/readme.md)。
+两项均编译进 HAP，**改完必须重新构建并安装**，WGT 热更新与替换 `www` 无效；建议解包 HAP 确认已生效。工程形态上的落地差异（HBuilderX 工程走 `harmony-configs/` 整体覆盖；cli 工程该项落在构建产物 `dist/*/app-harmony` 里、`harmony-configs` 对 cli 不生效；自维护权威工程直接改源文件并注意构建脚本是否会重新生成）见插件 [`readme.md` 2.2`](src/uni_modules/xyyt-wxmerchanttransfer/readme.md)。
 
 **不需要改 `EntryAbility`**：Want 接管已由插件内部钩子完成。
 

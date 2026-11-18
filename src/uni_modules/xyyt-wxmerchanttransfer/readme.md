@@ -49,9 +49,10 @@
 
 将 `xyyt-wxmerchanttransfer` 目录复制到工程 `src/uni_modules/` 下（从插件市场导入同理）。插件依赖声明在 `utssdk/app-harmony/config.json`（`@tencent/wechat_open_sdk@1.0.23`）。
 
-依赖落地方式分两种，请注意区分：
+依赖落地方式分三种，请注意区分：
 
 - **HBuilderX 工程（运行到鸿蒙 / 本地打包）**：工具链会把 UTS 插件编成独立模块，并自动写入 `build-profile.json5` 的 modules、`oh-package.json5` 依赖与插件注册代码，无需手工处理。
+- **uni-app cli 工程（`uni build -p app-harmony`）**：上述自动生成同样由工具链完成，宿主原生零改动即可加载插件（本插件 1.0.0 的全链路真机验证正是在独立 cli demo 工程完成的）。但要注意：cli 生成的 `dist/dev/app-harmony` / `dist/build/app-harmony` 是**构建产物**，其中 `entry/src/main/module.json5` 的两项宿主配置（见 2.2）没有官方覆盖入口 —— `harmony-configs/` 是 HBuilderX 独有机制，在 `@dcloudio/*` 全包检索该字符串零命中。请把生成的鸿蒙工程纳入你自己的版本管理，或直接走下面第三种自维护权威工程路线。
 - **已有自己的鸿蒙原生权威工程（离线打包 / 手工维护工程）**：`uni build -p app-harmony` 只产出 `dist/build/app-harmony`，**不会**替你修改工程配置。需自行完成四步：
   1. `ohpm install @tencent/wechat_open_sdk@1.0.23`；
   2. 根 `build-profile.json5` 的 `modules` 注册插件模块（`name` 须与模块自身 `src/main/module.json5` 的 `name` 完全一致，否则编译失败）；
@@ -92,14 +93,17 @@
 
 > 早期版本文档把 `actions` 与 `querySchemes` 平级写在 `module` 节点下，是错的 —— 照抄不会生成预期的 intent 过滤，回跳同样收不到。若你已按旧片段配置过，请重新核对层级。
 
-#### 两类工程的落地方式
+#### 三类工程的落地方式
 
 `manifest.json` 里没有任何开关能生成这两项，只能落到原生 `module.json5`；区别在于改哪一份、改完会不会被后续构建冲掉：
 
 - **HBuilderX 工程（发行 → App-Harmony-本地打包）**：`module.json5` 属于打包生成的中间产物，直接改容易被重新生成覆盖。建议通过项目根目录 `harmony-configs/` 提供**完整的** `module.json5` 覆盖（该目录内文件是原样整体覆盖，不能只给片段）；注意 `manifest.json` 中的鸿蒙配置优先级高于 `harmony-configs`。
-- **uni-app cli 工程 / 自维护原生权威工程**（配套 demo 与多数离线打包工程属此类）：`entry/src/main/module.json5` 是长期存在的源文件，直接编辑即可。但如果你的构建脚本会用模板重新生成整个 `entry` 目录，请把这两项写进模板、或在脚本里加一步 patch，否则改动会被下一次构建冲掉。
+- **uni-app cli 工程**：`entry/src/main/module.json5` 存在于构建产物 `dist/dev|build/app-harmony` 里，改它照样生效（本插件真机验证即如此），但它是生成物 —— 删 `dist` 重建或换机器构建都会丢，而 `harmony-configs/` 对 cli 并不起作用。因此要么把生成的鸿蒙工程纳入你自己的版本管理并在重建后核对这两项是否还在，要么转为下面一种形态。
+- **自维护原生权威工程**：`entry/src/main/module.json5` 是长期存在的源文件，直接编辑即可。但如果你的构建脚本会用模板重新生成整个 `entry` 目录，请把这两项写进模板、或在脚本里加一步 patch，否则改动会被下一次构建冲掉。
 
 **改完必须重新构建并安装 HAP 才生效**：`module.json5` 编译进 HAP，WGT 热更新、替换 `www` 目录都不起作用。落地后建议做产物级确认 —— 解包 HAP 检查其中的 `module.json` 是否真的带上了 `querySchemes` 与 `wxentity.action.open`，不要只看源文件。
+
+> 插件自带的 `utssdk/app-harmony/module.json5` 定制机制代劳不了这两项：`uni-uts-v1`（`dist/arkts/index.js`，源码注释即「以下文件用户可定制」）会读取插件的该文件、与默认值合并后写入**插件模块自身**的 `src/main/module.json5`。而 `querySchemes` 必须在发起 `canOpenLink` 的 entry 模块声明、`skills.actions` 挂在 entry 的 `EntryAbility` 上，两者都不在插件模块内 —— 所以这两项只能由宿主自己配。
 
 ### 2.3 微信回跳 Want 的接收（插件自动完成，无需改原生）
 
