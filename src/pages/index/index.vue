@@ -1,7 +1,7 @@
 <template>
   <view class="wrap">
     <text class="title">微信商家转账确认收款 Demo</text>
-    <text class="desc">鸿蒙端调起微信 requestMerchantTransfer 确认收款页面；用户在微信确认/取消后回跳 App，通过 onMerchantTransferResult 收到确认结果。</text>
+    <text class="desc">鸿蒙端调起微信 requestMerchantTransfer 确认收款页面；用户在微信确认/取消后回跳 App，通过 onMerchantTransferResult 收到确认结果。微信回跳的 Want 由插件内部 UTSHarmony 钩子自动接管，宿主无需修改原生代码。</text>
 
     <view class="field">
       <text class="label">mchId 商户号</text>
@@ -18,6 +18,7 @@
 
     <button class="btn" type="primary" @click="startTransfer">发起确认收款</button>
     <button class="btn-plain" @click="checkLast">查询最近一次结果（轮询式）</button>
+    <button class="btn-plain" @click="prefillAppId">预配 appId（冷启动回跳兜底）</button>
 
     <view class="box" v-if="launchResult !== ''">
       <text class="box-title">调起结果</text>
@@ -31,7 +32,8 @@
     <view class="tips">
       <text class="tips-title">注意事项</text>
       <text class="tips-item">1. result=success 仅代表微信确认收款页面展示成功，不代表确认成功，到账以订单/列表接口为准。</text>
-      <text class="tips-item">2. 真机需完成原生集成：module.json5 配 querySchemes=["weixin"]，EntryAbility onCreate/onNewWant 调 handleWeChatWant(want)。详见插件 readme.md。</text>
+      <text class="tips-item">2. 宿主唯一必须配置：module.json5 的 querySchemes=["weixin"]。Want 接管已由插件自动完成，不需要改 EntryAbility（详见插件 readme.md）。</text>
+      <text class="tips-item">3. 冷启动回跳（App 被系统回收后从微信返回）时插件内部尚无 WXApi 实例，点上方“预配 appId”或在 App.vue onLaunch 调 setMerchantTransferAppId 即可覆盖。</text>
     </view>
   </view>
 </template>
@@ -44,7 +46,8 @@ import {
   onMerchantTransferResult,
   offMerchantTransferResult,
   getLastMerchantTransferResult,
-  clearMerchantTransferResult
+  clearMerchantTransferResult,
+  setMerchantTransferAppId
 } from '@/uni_modules/xyyt-wxmerchanttransfer'
 // #endif
 
@@ -123,6 +126,21 @@ function stopPoll() {
     clearInterval(pollTimer)
     pollTimer = null
   }
+}
+
+/** 冷启动回跳兜底：预配 appId 使 onCreate 收到的 Want 也能被分发（实际项目建议放 App.vue onLaunch） */
+function prefillAppId() {
+  // #ifdef APP-HARMONY
+  if (appId.value === '') {
+    uni.showToast({ title: '请先填写 appId', icon: 'none' })
+    return
+  }
+  setMerchantTransferAppId(appId.value)
+  uni.showToast({ title: '已预配 appId', icon: 'none' })
+  // #endif
+  // #ifndef APP-HARMONY
+  uni.showToast({ title: '本 demo 仅在鸿蒙端有效', icon: 'none' })
+  // #endif
 }
 
 onUnmounted(() => {

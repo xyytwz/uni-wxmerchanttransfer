@@ -3,17 +3,24 @@
  * 微信商家转账用户确认收款（WXOpenBusinessView / requestMerchantTransfer）鸿蒙实现
  *
  * 依赖：@tencent/wechat_open_sdk（见同目录 config.json），要求微信客户端 >= 8.0.11.34
- * 宿主集成（必读）：
- *  1. 宿主 module.json5 配置 querySchemes: ["weixin"]（微信回跳宿主的 scheme 白名单）
- *  2. EntryAbility.onCreate / onNewWant 中调用 handleWeChatWant(want)，把微信回跳的 Want 交给插件分发
- *     ——鸿蒙 UTS 插件无应用生命周期代理（官方文档：鸿蒙平台"不涉及" HookProxy 章节），
- *        Want 分发必须由宿主转发，这是本插件区别于 Android/iOS 实现的集成步骤。
- *  3. 与宿主已集成的其他微信能力（oauth 登录等）可共存：各自 handleWant 各自处理认识的 resp 类型。
+ *
+ * Want 分发机制（自动接管）：
+ *  插件在模块加载时通过 UTSHarmony.onAppAbilityCreate / onAppAbilityNewWant 自行监听宿主
+ *  EntryAbility 生命周期并接管微信回跳的 Want（官方 UTSHarmony 兼容性：uni-app HarmonyOS
+ *  UTS 插件 >= 4.31），因此 HBuilderX 云打包工程无需修改任何原生代码。
+ *  宿主集成仅需：module.json5 配置 querySchemes: ["weixin"]（微信回跳宿主的 scheme 白名单）。
+ *
+ * 兼容与兜底路径（均为可选）：
+ *  - handleWeChatWant(want)：离线打包等自行维护 EntryAbility 的工程，可继续手工转发 Want。
+ *  - setMerchantTransferAppId(appId)：冷启动回跳（App 被回收后从微信返回）时插件尚无 WXApi
+ *    实例，宿主在启动早期配置一次 appId 即可让该场景的 Want 也被正常分发。
+ *  - 与宿主其他微信能力（oauth 登录等）可共存：各自 handleWant 各自处理认识的 resp 类型。
  *
  * 已验证环境：uni-app（vue3）+ 自定义原生壳工程（DevEco）+ @tencent/wechat_open_sdk 1.0.23 真机通过。
  */
 import * as wxopensdk from '@tencent/wechat_open_sdk'
 import Want from '@ohos.app.ability.Want'
+import AbilityConstant from '@ohos.app.ability.AbilityConstant'
 import { common } from '@kit.AbilityKit'
 import {
 	RequestMerchantTransfer,
@@ -37,6 +44,10 @@ let _wxApiAppId = ''
 let _pendingResultCallback: MerchantTransferResultCallback | null = null
 /** 最近一次结果缓存（供轮询式读取） */
 let _lastResult: MerchantTransferResult | null = null
+/** EntryAbility 生命周期钩子是否已安装（防重复注册） */
+let _hooksInstalled = false
+/** WXApi 尚未就绪时暂存的回跳 Want，待 appId 可用后补投 */
+let _pendingWant: Want | null = null
 
 class TransferEventHandler implements wxopensdk.WXApiEventHandler {
 	onReq(req: wxopensdk.BaseReq): void {
@@ -192,14 +203,96 @@ export const clearMerchantTransferResult: ClearMerchantTransferResult = function
 	_lastResult = null
 }
 
+/** 日志用：仅输出 Want.uri 前缀，避免打印完整回调参数 */
+function wantUriBrief(want: Want): string {
+	const raw = want.uri
+	const s = raw == null ? '' : raw + ''
+	if (s == '') {
+		return '(empty)'
+	}
+	return s.length > 32 ? s.substring(0, 32) + '...' : s
+}
+
 /**
- * 【宿主集成】在 EntryAbility.onCreate / onNewWant 中调用，把微信回跳的 Want 交给插件分发。
- * @param want 微信回跳的 Want
- * @param appId 可选；若在首次调起前发生回跳（极少），可用此 appId 提前建立 WXApi
+ * Want 分发核心：交给微信 SDK，命中转账 resp 时返回 true。
+ * WXApi 尚未建立（冷启动回跳、首次调起前回跳）则暂存 Want，等 appId 就绪后补投。
  */
-export function handleWeChatWant(want: Want, appId?: string): boolean {
+function dispatchWant(want: Want, appId?: string): boolean {
+	console.info(TAG + ' ability want received, uri=' + wantUriBrief(want))
 	if (!ensureWxApi(appId ?? '')) {
+		_pendingWant = want
+		console.warn(TAG + ' want deferred: wxApi not ready, call setMerchantTransferAppId early')
 		return false
 	}
-	return _wxApi!.handleWant(want, _eventHandler)
+	const ok = _wxApi!.handleWant(want, _eventHandler)
+	console.info(TAG + ' wx sdk handleWant consumed: ' + ok)
+	if (ok) {
+		_pendingWant = null
+	}
+	return ok
+}
+
+/** appId 就绪后补投暂存的 Want（冷启动回跳兜底） */
+function flushPendingWant(): void {
+	if (_pendingWant == null) {
+		return
+	}
+	const pending = _pendingWant!
+	_pendingWant = null
+	console.info(TAG + ' flushing pending want, uri=' + wantUriBrief(pending))
+	if (!ensureWxApi('')) {
+		_pendingWant = pending
+		return
+	}
+	if (!_wxApi!.handleWant(pending, _eventHandler)) {
+		console.info(TAG + ' pending want not consumed by wx sdk')
+	}
+}
+
+/**
+ * 安装 EntryAbility 生命周期钩子，插件加载即接管微信回跳 Want，宿主无需修改原生代码。
+ * onCreate 覆盖冷启动回跳，onNewWant 覆盖应用存活时的回跳。
+ */
+function installAbilityHooks(): void {
+	if (_hooksInstalled) {
+		return
+	}
+	_hooksInstalled = true
+	try {
+		UTSHarmony.onAppAbilityCreate((want: Want, launchParam: AbilityConstant.LaunchParam) => {
+			dispatchWant(want)
+		})
+		UTSHarmony.onAppAbilityNewWant((want: Want, launchParam: AbilityConstant.LaunchParam) => {
+			dispatchWant(want)
+		})
+		console.info(TAG + ' ability hooks installed')
+	} catch (e) {
+		// 低于 4.31 或其他异常：回退到宿主手工转发 handleWeChatWant
+		_hooksInstalled = false
+		console.error(TAG + ' install ability hooks failed, fallback to handleWeChatWant: ' + JSON.stringify(e))
+	}
+}
+
+installAbilityHooks()
+
+/**
+ * 【可选】提前配置微信 appId。
+ * 冷启动回跳场景下插件内部还没有 WXApi 实例，Want 无法分发；宿主在启动早期调一次本方法即可覆盖该场景。
+ */
+export function setMerchantTransferAppId(appId: string): void {
+	if (!ensureWxApi(appId)) {
+		console.warn(TAG + ' setMerchantTransferAppId: empty appId')
+		return
+	}
+	flushPendingWant()
+}
+
+/**
+ * 【可选兜底】在宿主 EntryAbility.onCreate / onNewWant 中手工转发微信回跳的 Want。
+ * 仅适用于自行维护原生工程的场景；常规接入由插件内部 UTSHarmony 钩子自动完成，无需调用本方法。
+ * @param want 微信回跳的 Want
+ * @param appId 可选；首次调起前发生回跳时用它提前建立 WXApi
+ */
+export function handleWeChatWant(want: Want, appId?: string): boolean {
+	return dispatchWant(want, appId)
 }

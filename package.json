@@ -1,5 +1,5 @@
 {
-  "name": "demo-harmony-transfer",
+  "name": "uni-wxmerchanttransfer",
   "version": "1.0.0",
   "description": "xyyt-wxmerchanttransfer 插件 demo（微信商家转账确认收款·鸿蒙）",
   "scripts": {

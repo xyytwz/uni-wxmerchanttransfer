@@ -4,9 +4,13 @@
 
 官方插件 `uni-requestMerchantTransfer` 目前只实现了 Android/iOS（鸿蒙端为 `-`），本插件补位鸿蒙实现；**调起字段与官方 API 保持一致**，可直接作为鸿蒙分支替换使用。
 
+微信回跳的 `Want` 由插件内部通过 `UTSHarmony` 生命周期钩子自动接管，**宿主无需修改任何原生代码**（只需配置 `querySchemes`）。
+
+原理：HBuilderX 生成的鸿蒙 `EntryAbility` 继承运行时 `UniEntryAbility`，其 `onCreate` / `onNewWant` 内部会向 `appAbilityEmitter` 发出 `create` / `newWant` 事件，而 `UTSHarmony.onAppAbilityCreate` / `onAppAbilityNewWant` 订阅的正是这两个事件，因此插件必然能收到回跳 Want。注意鸿蒙平台只有「发行 → App-Harmony-本地打包」，**不存在云打包**。
+
 > 已验证环境：uni-app（vue3）+ 自定义原生壳工程（DevEco Studio）+ `@tencent/wechat_open_sdk@1.0.23` + HarmonyOS NEXT 真机 + 微信客户端 8.0.x。
 >
-> 配套博文《补上缺失的拼图：为 uni-app 鸿蒙端实现微信“商家转账确认收款”插件》（可行性分析 / 宿主转发方案 / 踩坑记录）：掘金 `https://juejin.cn/post/TODO` · 博客园 `https://www.cnblogs.com/TODO`（发布后回填）
+> 配套博文《补上缺失的拼图：为 uni-app 鸿蒙端实现微信“商家转账确认收款”插件》（可行性分析 / 宿主转发方案 / 踩坑记录）：即将发布于掘金与博客园，链接将在后续版本补充。
 
 ---
 
@@ -19,7 +23,8 @@
 | `getLastMerchantTransferResult()` | 【鸿蒙增强】轮询式读取最近一次确认结果 |
 | `clearMerchantTransferResult()` | 清除结果缓存 |
 | `offMerchantTransferResult()` | 注销未触发的结果回调 |
-| `handleWeChatWant(want, appId?)` | 【宿主集成】转发微信回跳 Want 给插件 |
+| `handleWeChatWant(want, appId?)` | 【可选】自维护原生工程时手工转发 Want（常规接入由插件自动完成） |
+| `setMerchantTransferAppId(appId)` | 【冷启动兜底】预配 appId，使 `onCreate` 回跳的 Want 也能正常分发 |
 
 | 平台 | 支持 |
 |---|---|
@@ -28,7 +33,7 @@
 
 环境要求：
 
-- HBuilderX ≥ 4.23（鸿蒙 UTS 插件编译），uni-app vue3 工程
+- HBuilderX ≥ 4.31（插件依赖 `UTSHarmony` 生命周期钩子，官方标注 uni-app HarmonyOS UTS 插件自 4.31 支持），uni-app vue3 工程
 - 微信客户端 ≥ 8.0.11.34（低于此版本无法拉起确认收款页面）
 - 微信开放平台已为宿主 App 配置鸿蒙平台（Bundle ID + appIdentifier），AppID 与调起参数 `appId` 一致
 
@@ -38,9 +43,18 @@
 
 ### 2.1 安装插件
 
-将 `xyyt-wxmerchanttransfer` 目录复制到工程 `src/uni_modules/` 下（HBuilderX 导入插件同理）。插件会自带依赖声明（`@tencent/wechat_open_sdk@1.0.23`，见 `utssdk/app-harmony/config.json`），编译鸿蒙时自动加入 ohpm 依赖。
+将 `xyyt-wxmerchanttransfer` 目录复制到工程 `src/uni_modules/` 下（从插件市场导入同理）。插件依赖声明在 `utssdk/app-harmony/config.json`（`@tencent/wechat_open_sdk@1.0.23`）。
 
-### 2.2 宿主 module.json5 配置 querySchemes（必须）
+依赖落地方式分两种，请注意区分：
+
+- **HBuilderX 工程（运行到鸿蒙 / 本地打包）**：工具链会把 UTS 插件编成独立模块，并自动写入 `build-profile.json5` 的 modules、`oh-package.json5` 依赖与插件注册代码，无需手工处理。
+- **已有自己的鸿蒙原生权威工程（离线打包 / 手工维护工程）**：`uni build -p app-harmony` 只产出 `dist/build/app-harmony`，**不会**替你修改工程配置。需自行完成四步：
+  1. `ohpm install @tencent/wechat_open_sdk@1.0.23`；
+  2. 根 `build-profile.json5` 的 `modules` 注册插件模块（`name` 须与模块自身 `src/main/module.json5` 的 `name` 完全一致，否则编译失败）；
+  3. `entry/oh-package.json5` 加入本地模块依赖（形如 `"@uni_modules/xyyt-wxmerchanttransfer": "file:../xyyt_wxmerchanttransfer"`）；
+  4. 在**参与 ArkTS 编译**的 `entry/src/main/ets/uni_modules/index.generated.ets` 补 `import` 与 `uni.registerUTSPlugin`（`www` 下的同名文件只是资源，不参与编译）。缺这一步时运行时 `uni.requireUTSPlugin` 返回 undefined。
+
+### 2.2 宿主 module.json5 配置 querySchemes（必须，且是唯一必需的宿主配置）
 
 微信回跳宿主依赖 scheme 白名单。在你的鸿蒙原生工程 `entry/src/main/module.json5` 的 `module` 节点中配置：
 
@@ -56,19 +70,37 @@
 
 > uni-app HBuilderX 默认生成的鸿蒙壳工程同样如此：找到生成的 `entry/src/main/module.json5` 添加（或通过 harmony-configs 覆盖）。
 
-### 2.3 宿主 EntryAbility 转发微信回跳 Want（必须）
+### 2.3 微信回跳 Want 的接收（插件自动完成，无需改原生）
 
-**鸿蒙 UTS 插件没有应用生命周期代理**（官方 UTS 文档：HookProxy 仅 iOS/Android，鸿蒙平台"不涉及"），因此微信回跳的 Want 必须由宿主 `EntryAbility` 转发给插件——这是本插件区别于 Android/iOS 插件的唯一额外集成步骤。
+插件加载时通过 `UTSHarmony.onAppAbilityCreate` / `UTSHarmony.onAppAbilityNewWant` 监听宿主 `EntryAbility` 生命周期，自行接管微信回跳的 `Want` 并交给微信 SDK 分发。前者覆盖冷启动回跳，后者覆盖应用存活时的回跳。
 
-在 `entry/src/main/ets/entryability/EntryAbility.ets` 中：
+因此 **HBuilderX 工程（鸿蒙只有本地打包，不存在云打包）不需要修改任何原生代码**，完成 2.1、2.2 后即可直接使用。若确实要改动生成的原生文件，可通过项目根目录下的 `harmony-configs` 目录覆盖：该目录内文件是**原样整体覆盖**（因此必须提供完整文件而非片段），且 `manifest.json` 中的鸿蒙配置优先级高于 `harmony-configs`。
+
+> 前提：插件必须被前端静态引用才会进入编译范围（见第四节注意事项 7），否则钩子不会安装。
+
+#### 冷启动回跳（App 已被系统回收）
+
+用户长时间停留在微信确认收款页面、宿主进程被回收时，回跳走 `onCreate`，此时插件还未调起过、内部没有 `WXApi` 实例，无法确定 appId。两种处理方式：
+
+- 在 `App.vue` 的 `onLaunch` 里调一次 `setMerchantTransferAppId('wxYourAppId')`（推荐，一行代码，无原生改动）；
+- 或忽略：插件会把该 Want 暂存，待下一次 `requestMerchantTransfer` 或 `setMerchantTransferAppId` 时自动补投。
+
+```vue
+<script setup>
+// #ifdef APP-HARMONY
+import { setMerchantTransferAppId } from '@/uni_modules/xyyt-wxmerchanttransfer'
+setMerchantTransferAppId('wxYourAppId')
+// #endif
+</script>
+```
+
+### 2.4 可选：自维护原生工程手工转发 Want
+
+仅在以下场景需要：你自己的鸿蒙工程直接持有 `EntryAbility`（离线打包 / 原生权威工程），且希望在原生层显式控制分发时机。常规接入无需本节。
 
 ```ets
-// 1) 顶部导入（插件编译产物模块名 = 插件 id 全小写）
 import { handleWeChatWant } from '@uni_modules/xyyt-wxmerchanttransfer'
-// 若路径报错，以鸿蒙工程内实际生成的产物为准
-// （可在 entry/src/main/ets/uni_modules/ 或 oh_modules 内搜索 handleWeChatWant 确认）
 
-// 2) onCreate / onNewWant 中转发
 onCreate(want: Want, launchParam: AbilityConstant.LaunchParam): void {
   handleWeChatWant(want);
   // ...原有逻辑
@@ -82,9 +114,9 @@ onNewWant(want: Want, launchParam: AbilityConstant.LaunchParam): void {
 
 完整示例见插件内 `native-integration/EntryAbility.example.ets`。
 
-**与微信登录（uni-oauth-weixin）共存**：二者各自调用 `WXApi.handleWant(want, 各自的 handler)`，各自只处理认识的 `resp` 类型（登录处理 `SendAuth.Resp`，本插件处理 `OpenBusinessViewResp`），互不冲突。若宿主已集成微信登录，仅需在本插件再补一次 `handleWeChatWant(want)` 调用。
+> 不要与自动接管叠加：若宿主已手工转发，插件内部钩子会再转发一次，同一 Want 被 `handleWant` 两次。微信 SDK 对非本插件类型的 resp 会忽略，但为避免歧义，两种方式二选一即可。
 
-### 2.4 页面调用
+### 2.5 页面调用
 
 ```vue
 <script setup lang="ts">
@@ -187,20 +219,21 @@ const timer = setInterval(() => {
 ## 四、注意事项
 
 1. **result 语义**：微信官方定义回调 `success` 仅表示"确认收款页面展示成功"，不代表用户已确认或资金到账；业务侧请以刷新后的订单/列表接口为准。
-2. **原生改动必须整包**：本插件产物在鸿蒙原生层（含 EntryAbility 集成代码），WGT 热更新覆盖不了，升级需重新打 HAP 整包。
+2. **UTS 产物属原生层，插件自身升级需重打包**：插件代码被编译为 ArkTS 打进 HAP，不在 JS 层，因此插件版本升级无法靠 WGT 热更新覆盖；但接入本身已不需要宿主改原生代码，不再为此维护原生工程。
 3. **重复调起**：`onMerchantTransferResult` 为一次性回调；同一时刻仅保留最后一次注册。重复调起前建议先处理上一次结果（或改用轮询 API）。
 4. **依赖冲突**：若宿主同时集成微信登录插件（uni-oauth-weixin），其传递依赖同为 `@tencent/wechat_open_sdk`，ohpm 自动去重，无需处理；若出现版本不一致，可在鸿蒙工程根 `oh-package.json5` 的 `overrides` 中统一版本。
 5. **服务商模式**：传 `subAppId`/`subMchId` 时 query 由微信侧校验，`mchId` 传服务商商户号。
-6. **uni-app x**：插件声明兼容 uni-app x（harmony），但已在 uni-app（vue3）真机验证；uni-app x 下请以实际编译结果为准。
-7. **HBuilderX 工程须保留一条页面静态 import**：UTS 插件只有在被前端静态引用时才会纳入编译范围。若只在原生 `EntryAbility` 引用 `handleWeChatWant`、页面侧无任何 import，HBuilderX 不会编译 `utssdk/app-harmony/index.uts`，运行时 `uni.requireUTSPlugin` 返回 undefined。请在任一 `#ifdef APP-HARMONY` 页面保留 `import ... from '@/uni_modules/xyyt-wxmerchanttransfer'`（demo 页即示例）。改动插件引用关系后，需先删除工程 `dist/`（HBuilderX 工程为 `unpackage/`）再重新运行，否则会复用旧的“未被引用”判定。
+6. **uni-app x**：本插件仅在 uni-app（vue3）鸿蒙端验证，因此 `package.json` 中 uni-app x 鸿蒙声明为不支持（`-`）。uvue / uni-app x 工程请勿直接引用；如确有需求，请先自行验证编译与运行，后续版本可据验证结果再开放。
+7. **HBuilderX 工程须保留一条页面静态 import**：UTS 插件只有在被前端静态引用时才会纳入编译范围。若只在原生 `EntryAbility` 引用 `handleWeChatWant`、页面侧无任何 import，HBuilderX 不会编译 `utssdk/app-harmony/index.uts`，运行时 `uni.requireUTSPlugin` 返回 undefined。请在任一 `#ifdef APP-HARMONY` 页面保留 `import ... from '@/uni_modules/xyyt-wxmerchanttransfer'`（demo 页即示例）。改动插件引用关系后，需先删除工程 `dist/`（HBuilderX 工程为 `unpackage/`）再重新运行，否则会复用旧的“未被引用”判定。对普通插件这只是编译问题，对本插件则是功能前提：生命周期钩子在插件模块加载时才安装，插件没进编译范围就等于钩子不存在，调起依然能发起、但确认结果永远回不来。
 
 ---
 
 ## 五、Demo
 
-仓库 `demo-harmony-transfer/` 为 uni-app cli 工程（vue3），`src/pages/index/index.vue` 演示完整流程（参数输入 → 调起 → 结果回调与轮询展示）。真机验证需按第二节完成原生工程集成（querySchemes + EntryAbility 转发）。
+仓库根本身就是 uni-app cli demo 工程（vue3）：`src/pages/index/index.vue` 演示完整流程（参数输入 → 调起 → 结果回调与轮询展示），插件源码位于 `src/uni_modules/xyyt-wxmerchanttransfer/`。真机验证只需按 2.1、2.2 完成（插件自动接管 Want，无需改原生）。
 
 ## 六、已知限制
 
 - 仅鸿蒙端生效；Android/iOS 请用官方插件（本插件不重复实现）。
-- 调起依赖宿主集成 `handleWeChatWant`；未集成时调起可发起但收不到确认结果回调（`getLastMerchantTransferResult` 亦无结果），页面可据此提示。
+- 结果回传依赖微信回跳 `Want` 被成功分发：常规场景由插件内部 UTSHarmony 钩子自动完成；若插件未被前端静态引用（注意事项 7）或宿主 HBuilderX 低于 4.31，钩子装不上，此时调起可发起但收不到确认结果，需升级 HBuilderX 或按 2.4 手工转发。
+- 钩子自动接管与冷启动暂存补投两个机制目前仅在工程与编译层验证，尚无真机结论；若你的场景发回跳异常，请先用 `getLastMerchantTransferResult` 轮询定位。
