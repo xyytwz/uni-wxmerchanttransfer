@@ -1,20 +1,26 @@
 {
   "id": "xyyt-wxmerchanttransfer",
-  "displayName": "微信商家转账确认收款（uni-app 鸿蒙 HarmonyOS NEXT）",
+  "displayName": "微信商家转账提现·用户确认收款（uni-app 鸿蒙 HarmonyOS NEXT）",
   "version": "1.0.0",
-  "description": "鸿蒙（HarmonyOS NEXT）端微信商家转账用户确认收款：调起微信确认收款页面（requestMerchantTransfer），并回传用户确认结果（success/fail/cancel）。补位官方 uni-requestMerchantTransfer 缺失的鸿蒙实现，调起字段与官方 API 一致。插件内部通过 UTSHarmony 监听 EntryAbility 生命周期自动接管微信回跳 Want，无需修改宿主原生代码；亦提供宿主手工转发与冷启动预配 appId 的兼容接口。",
+  "description": "uni-app 鸿蒙（HarmonyOS NEXT）端微信商家转账/提现的用户确认收款：调起微信确认收款页面（requestMerchantTransfer），并回传用户确认结果（success/fail/cancel）。补位官方 uni-requestMerchantTransfer 缺失的鸿蒙实现，调起字段与官方 API 一致，可直接作为鸿蒙分支替换使用。注：本插件只覆盖提现流程中「用户确认收款」环节，发起转账仍需后端调用微信支付商家转账接口。",
   "keywords": [
+    "提现",
+    "提现到零钱",
     "确认收款",
     "商家转账",
+    "企业付款",
     "requestMerchantTransfer",
     "微信",
     "鸿蒙",
+    "HarmonyOS",
     "uni-app",
     "UTS"
   ],
   "repository": "https://github.com/xyytwz/uni-wxmerchanttransfer",
   "engines": {
-    "HBuilderX": "^4.31"
+    "HBuilderX": ">=4.31",
+    "uni-app": "^3.1.0",
+    "uni-app-x": "^3.1.0"
   },
   "dcloudext": {
     "type": "uts",
@@ -37,7 +43,8 @@
     "npmurl": "",
     "darkmode": "x",
     "i18n": "x",
-    "widescreen": "x"
+    "widescreen": "x",
+    "vapor": "-"
   },
   "uni_modules": {
     "dependencies": [],

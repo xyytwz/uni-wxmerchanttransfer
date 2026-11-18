@@ -1,8 +1,8 @@
 # uni-wxmerchanttransfer
 
-> 仓库名 / 工程名为 `uni-wxmerchanttransfer`，但 **DCloud 插件 ID 仍为 `xyyt-wxmerchanttransfer`**：插件 ID 规范格式为「作者ID-插件英文名」，而作者ID 不得使用 `DCloud`、`uni` 等关键字（见官方发布规范）。因此插件目录、`package.json` 的 `id`、鸿蒙模块名 `@uni_modules/xyyt-wxmerchanttransfer` 与页面导入路径均保持原样，请勿按仓库名改写。
+> 仓库名 / 工程名为 `uni-wxmerchanttransfer`，但 **DCloud 插件 ID 仍为 `xyyt-wxmerchanttransfer`**：插件 ID 规范格式为「作者ID-插件英文名」，而作者ID 不得使用 `DCloud`、`uni` 等关键字（见官方发布规范）。因此插件目录、`package.json` 的 `id`、鸿蒙模块名 `@uni_modules/xyyt-wxmerchanttransfer` 与页面导入路径均保持原样，请勿按仓库名改写。市场展示名、描述与检索词则走 `displayName` / `description` / `keywords`（中文，与 ID 无需同名），需要新增检索词（如“提现”）只改这三个字段。
 
-uni-app **鸿蒙端（HarmonyOS NEXT）微信商家转账用户确认收款** UTS 插件 + demo 工程。
+uni-app **鸿蒙端（HarmonyOS NEXT）微信商家转账 / 提现的用户确认收款** UTS 插件 + demo 工程（市场标题：微信商家转账提现·用户确认收款）。
 
 补位官方 `uni-requestMerchantTransfer` 缺失的 HarmonyOS 实现（该官方插件至今只有 Android/iOS，`arkts: false`）：调起微信确认收款页面（`requestMerchantTransfer`），并回传用户确认结果（`success` / `fail` / `cancel`）。调起字段与官方 API 完全一致，可直接作为鸿蒙分支替换使用。
 
@@ -10,7 +10,6 @@ uni-app **鸿蒙端（HarmonyOS NEXT）微信商家转账用户确认收款** UT
 
 - 插件本体与完整集成文档：[`src/uni_modules/xyyt-wxmerchanttransfer`](src/uni_modules/xyyt-wxmerchanttransfer)（上传 DCloud 插件市场时打包此目录）
 - 插件市场：即将上架 DCloud 插件市场（ext.dcloud.net.cn），上架后在此回填链接
-- 配套博文：即将发布于掘金 / 博客园，发布后在此回填链接
 
 ## 仓库结构
 
@@ -18,7 +17,6 @@ uni-app **鸿蒙端（HarmonyOS NEXT）微信商家转账用户确认收款** UT
 |---|---|
 | `src/uni_modules/xyyt-wxmerchanttransfer/` | **插件本体（唯一权威源）**：`package.json` / `readme.md` / `changelog.md` / `utssdk/` / `native-integration/` |
 | `src/pages/index/index.vue` | demo 页：参数输入 → 调起 → 一次性回调与轮询结果展示 |
-| `blog/` | 配套技术博文源稿（可行性分析 / 方案设计 / 踩坑记录） |
 | `scripts/check-sensitive.ps1` | 发布前脱敏自检（见下方「发布前检查」） |
 | 根 `package.json` / `vite.config.ts` | uni-app cli 工程（vue3）——本仓库同时就是插件的 demo 工程 |
 
@@ -118,6 +116,7 @@ requestMerchantTransfer({
 3. **插件升级需重打整包**：插件代码被编为 ArkTS 进 HAP，不在 JS 层，WGT 热更新覆盖不了；但接入已不需要宿主改原生代码。
 4. **依赖**：`@tencent/wechat_open_sdk@1.0.23` 由插件 `utssdk/app-harmony/config.json` 声明，编译鸿蒙时自动进 ohpm；与微信登录插件（uni-oauth-weixin）共存时同依赖自动去重，版本冲突可在根 `oh-package.json5` 的 `overrides` 统一。
 5. **微信客户端版本**：需 ≥ 8.0.11.34，低于此版本无法拉起确认收款页。
+6. **鸿蒙 API 版本**：需 API 12（HarmonyOS 5.0.0(12)）及以上——`@tencent/wechat_open_sdk@1.0.23` 与 `@dcloudio/uni-app-runtime` 均声明 `compatibleSdkVersion: 12`，低于此版本依赖装不上。API 版本写在宿主 `build-profile.json5` 里，插件包本身不携带；已在 API 12 与 API 13（5.0.1(13)）真机验证。
 
 ## 验证状态
 

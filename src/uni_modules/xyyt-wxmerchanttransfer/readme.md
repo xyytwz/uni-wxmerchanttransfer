@@ -1,6 +1,6 @@
 # xyyt-wxmerchanttransfer
 
-鸿蒙（HarmonyOS NEXT）端**微信商家转账用户确认收款**插件：调起微信确认收款页面（`requestMerchantTransfer`），并回传用户确认结果。
+鸿蒙（HarmonyOS NEXT）端**微信商家转账 / 提现的用户确认收款**插件：调起微信确认收款页面（`requestMerchantTransfer`），并回传用户确认结果。
 
 官方插件 `uni-requestMerchantTransfer` 目前只实现了 Android/iOS（鸿蒙端为 `-`），本插件补位鸿蒙实现；**调起字段与官方 API 保持一致**，可直接作为鸿蒙分支替换使用。
 
@@ -8,7 +8,7 @@
 
 原理：HBuilderX 生成的鸿蒙 `EntryAbility` 继承运行时 `UniEntryAbility`，其 `onCreate` / `onNewWant` 内部会向 `appAbilityEmitter` 发出 `create` / `newWant` 事件，而 `UTSHarmony.onAppAbilityCreate` / `onAppAbilityNewWant` 订阅的正是这两个事件，因此插件必然能收到回跳 Want。注意鸿蒙平台只有「发行 → App-Harmony-本地打包」，**不存在云打包**。
 
-> 已验证环境：uni-app（vue3）+ 自定义原生壳工程（DevEco Studio）+ `@tencent/wechat_open_sdk@1.0.23` + HarmonyOS NEXT 真机 + 微信客户端 8.0.x。
+> 已验证环境：uni-app（vue3）+ 自定义原生壳工程（DevEco Studio）+ `@tencent/wechat_open_sdk@1.0.23` + HarmonyOS NEXT 真机（API 12 / API 13）+ 微信客户端 8.0.x；cli 侧 `@dcloudio/*` 锁定版本为 `3.0.0-5020620260917001`。
 >
 > 2026-11-18 已在独立 uni-app cli 工程真机跑通全链路：调起确认收款页 → 用户在微信侧取消回跳 → 宿主原生零改动、插件 `UTSHarmony` 钩子接管成功 → `onMerchantTransferResult` 与 `getLastMerchantTransferResult()` 均返回 `{"result":"cancel"}`。
 
@@ -31,9 +31,12 @@
 | HarmonyOS NEXT（app-harmony） | ✅ |
 | Android / iOS / H5 / 小程序 | ❌（请继续使用官方 `uni-requestMerchantTransfer` 或 `wx.requestMerchantTransfer`） |
 
+**范围界定**：本插件只覆盖提现流程中「用户在微信里确认收款」这一步。发起转账仍需后端先调微信支付商家转账（转账到零钱）下单接口拿到 `package_info`；用户回传的 `cancel` 仅代表他未确认，不等于单据失败，到账与否请以自己的单据查询结果为准。
+
 环境要求：
 
 - **uni-app 编译工具链 / HBuilderX ≥ 4.31**：插件依赖 `UTSHarmony.onAppAbilityCreate` / `onAppAbilityNewWant`，其版本门槛来自 `@dcloudio/uni-app-runtime` 包内 `src/main/ets/uni-mp-sdk/types/UTSHarmony.d.ts` 的 `@uniPlatform` 标注 `harmony: { uniUtsPlugin: "4.31", uniVer: "4.31" }`（即 uni-app 而非仅 uni-app x 的鸿蒙 UTS 插件自 4.31 起支持）。低于此版本钩子装不上，表现为「调起正常、确认结果永远取不到」。
+- **HarmonyOS NEXT API 12（5.0.0(12)）及以上**：`@tencent/wechat_open_sdk@1.0.23` 与 `@dcloudio/uni-app-runtime` 包内均声明 `compatibleSdkVersion: 12`，低于 API 12 依赖装不上。API 版本属于宿主工程 `build-profile.json5` 的配置（插件包本身不携带），已在 API 12（`5.0.0(12)`）与 API 13（`5.0.1(13)`）真机验证；宿主工程的 `targetSdkVersion` 不影响插件可用性。
 - uni-app vue3 工程
 - 微信客户端 ≥ 8.0.11.34（低于此版本无法拉起确认收款页面）
 - 微信开放平台已为宿主 App 配置鸿蒙平台（Bundle ID + appIdentifier），AppID 与调起参数 `appId` 一致
