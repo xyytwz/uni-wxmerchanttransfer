@@ -7,8 +7,13 @@
  * Want 分发机制（自动接管）：
  *  插件在模块加载时通过 UTSHarmony.onAppAbilityCreate / onAppAbilityNewWant 自行监听宿主
  *  EntryAbility 生命周期并接管微信回跳的 Want（官方 UTSHarmony 兼容性：uni-app HarmonyOS
- *  UTS 插件 >= 4.31），因此 HBuilderX 云打包工程无需修改任何原生代码。
- *  宿主集成仅需：module.json5 配置 querySchemes: ["weixin"]（微信回跳宿主的 scheme 白名单）。
+ *  UTS 插件 >= 4.31），因此工程无需修改任何原生代码（鸿蒙只有本地打包，不存在云打包）。
+ *  宿主仍必须在 module.json5 配齐两项（缺一不可）：
+ *   - module.querySchemes 含 "weixin"：管拉起。缺失时 SDK 的 isWXAppInstalled() 里
+ *     canOpenLink("weixin://") 抛 BusinessError 17700056 并被吞成 false，误报“未安装微信”。
+ *   - module.abilities[].skills[].actions 含 "wxentity.action.open"：管回跳。缺失时调起
+ *     仍成功（确认收款页照样打开），但回跳 Want 路由不回宿主，确认结果永远取不到。
+ *  两项均编译进 HAP，改后必须重新构建安装，WGT 热更新 / 替换 www 无效。详见 readme.md 2.2。
  *
  * 兼容与兜底路径（均为可选）：
  *  - handleWeChatWant(want)：离线打包等自行维护 EntryAbility 的工程，可继续手工转发 Want。
@@ -21,6 +26,8 @@
 import * as wxopensdk from '@tencent/wechat_open_sdk'
 import Want from '@ohos.app.ability.Want'
 import AbilityConstant from '@ohos.app.ability.AbilityConstant'
+import bundleManager from '@ohos.bundle.bundleManager'
+import { BusinessError } from '@ohos.base'
 import { common } from '@kit.AbilityKit'
 import {
 	RequestMerchantTransfer,
@@ -36,6 +43,8 @@ import {
 
 const TRANSFER_BUSINESS_TYPE = 'requestMerchantTransfer'
 const TAG = 'xyyt-wxmerchanttransfer'
+/** SDK 的 isWXAppInstalled() 底层就是对该 link 调 canOpenLink，用于自查失败成因 */
+const WEIXIN_SCHEME_LINK = 'weixin://'
 
 /** WXApi 单例（按 appId 缓存创建，避免每次调用重复 createWXAPI） */
 let _wxApi: wxopensdk.WXApi | null = null
@@ -110,6 +119,46 @@ function ensureWxApi(appId: string): boolean {
 	return _wxApi != null
 }
 
+/**
+ * 区分「真的没装微信」与「宿主 querySchemes 未配置」。
+ * SDK 的 isWXAppInstalled() 实现是 bundleManager.canOpenLink("weixin://") 并 try/catch 后
+ * return false，querySchemes 缺 "weixin" 时抛出的 BusinessError（实测 17700056）会被吞掉，
+ * 导致配置缺失被误报成环境问题。这里自己再调一次拿回真实成因。
+ */
+function wechatUnavailableMsg(): string {
+	try {
+		// 不抛异常仍调起失败 → 确实是微信自身不可用（未安装或版本过低）
+		bundleManager.canOpenLink(WEIXIN_SCHEME_LINK)
+		return '未安装微信或微信版本过低，无法打开确认收款页面，请安装/升级微信后重试'
+	} catch (err) {
+		const e = err as BusinessError
+		const code = e.code
+		console.error(TAG + ' canOpenLink(' + WEIXIN_SCHEME_LINK + ') threw, code=' + code + ', message=' + e.message)
+		return '未能拉起微信：宿主 querySchemes 大概率未配置 "weixin"（canOpenLink 报 code=' + code
+			+ '，非未安装微信）。请在 entry/src/main/module.json5 的 module 节点补 querySchemes: ["weixin"]，'
+			+ '该文件编译进 HAP，必须重新构建并安装（WGT 热更新无效）'
+	}
+}
+
+/**
+ * 日志用：只输出可选字段的键名，不打印取值。
+ * query 里的 package 是后端下发的一次性转账单据令牌、openId 是用户标识，
+ * 完整打到 hilog 等于把凭据落到设备日志（hdc 可直接拉取），因此仅保留排查所需的结构信息。
+ */
+function optionalFieldFlags(options: RequestMerchantTransferOptions): string {
+	const flags: string[] = []
+	if (options.openId != null && options.openId != '') {
+		flags.push('openId')
+	}
+	if (options.subAppId != null && options.subAppId != '') {
+		flags.push('subAppId')
+	}
+	if (options.subMchId != null && options.subMchId != '') {
+		flags.push('subMchId')
+	}
+	return flags.length > 0 ? flags.join(',') : 'none'
+}
+
 function notifyResult(options: RequestMerchantTransferOptions, ok: boolean, errMsg: string): void {
 	const res: RequestMerchantTransferGeneralCallbackResult = { errMsg: errMsg }
 	if (ok) {
@@ -161,7 +210,7 @@ export const requestMerchantTransfer: RequestMerchantTransfer = function (option
 	}
 	const wxApi = _wxApi!
 	if (!wxApi.isWXAppInstalled()) {
-		notifyResult(options, false, '未安装微信或微信版本过低，请安装/升级微信后重试')
+		notifyResult(options, false, wechatUnavailableMsg())
 		return
 	}
 	// query 组装对齐官方 android 实现：mchId/package/appId 必填，其余可选（均需 UrlEncode）
@@ -180,7 +229,7 @@ export const requestMerchantTransfer: RequestMerchantTransfer = function (option
 	const req = new wxopensdk.OpenBusinessViewReq()
 	req.businessType = TRANSFER_BUSINESS_TYPE
 	req.query = query
-	console.info(TAG + ' requestMerchantTransfer query: ' + query)
+	console.info(TAG + ' requestMerchantTransfer launching, optional fields: ' + optionalFieldFlags(options))
 	// 清理上次残留，等待微信回跳
 	_lastResult = null
 	const context = getContext() as common.UIAbilityContext

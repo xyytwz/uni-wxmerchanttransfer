@@ -5,15 +5,16 @@
 
     <view class="field">
       <text class="label">mchId 商户号</text>
-      <input v-model="mchId" class="ipt" placeholder="微信支付商户号，如 1900000109" />
+      <input v-model="mchId" class="ipt" maxlength="-1" placeholder="微信支付商户号，如 1900000109" />
     </view>
     <view class="field">
       <text class="label">appId 微信开放平台 AppID</text>
-      <input v-model="appId" class="ipt" placeholder="微信开放平台 AppID，如 wx1234567890abcdef" />
+      <input v-model="appId" class="ipt" maxlength="-1" placeholder="微信开放平台 AppID，如 wxYourAppId" />
     </view>
     <view class="field">
-      <text class="label">package 转账单据 package_info</text>
-      <input v-model="packageInfo" class="ipt" placeholder="后端转账单据应答中的 package_info" />
+      <text class="label">package 转账单据 package_info（当前 {{ packageInfo.length }} 字符）</text>
+      <!-- 防御性显式放开长度限制：uni-app input 默认 maxlength=140，而 package_info 常超 140 字符 -->
+      <input v-model="packageInfo" class="ipt" maxlength="-1" placeholder="后端转账单据应答中的 package_info" />
     </view>
 
     <button class="btn" type="primary" @click="startTransfer">发起确认收款</button>
@@ -32,7 +33,7 @@
     <view class="tips">
       <text class="tips-title">注意事项</text>
       <text class="tips-item">1. result=success 仅代表微信确认收款页面展示成功，不代表确认成功，到账以订单/列表接口为准。</text>
-      <text class="tips-item">2. 宿主唯一必须配置：module.json5 的 querySchemes=["weixin"]。Want 接管已由插件自动完成，不需要改 EntryAbility（详见插件 readme.md）。</text>
+      <text class="tips-item">2. 宿主必配两项（缺一不可）：module.json5 的 querySchemes=["weixin"] 管拉起，abilities[].skills.actions 里的 wxentity.action.open 管回跳 —— 缺前者会误报「未安装微信」，缺后者能正常拉起但确认结果永远取不到。Want 接管已由插件自动完成（需 uni-app 编译工具链 ≥ 4.31），不需要改 EntryAbility（详见插件 readme.md 2.2）。</text>
       <text class="tips-item">3. 冷启动回跳（App 被系统回收后从微信返回）时插件内部尚无 WXApi 实例，点上方“预配 appId”或在 App.vue onLaunch 调 setMerchantTransferAppId 即可覆盖。</text>
     </view>
   </view>

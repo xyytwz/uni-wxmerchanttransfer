@@ -6,7 +6,10 @@
     "dev:h5": "uni",
     "build:h5": "uni build",
     "dev:app-harmony": "uni -p app-harmony",
-    "build:app-harmony": "uni build -p app-harmony"
+    "build:app-harmony": "uni build -p app-harmony",
+    "check:sensitive": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/check-sensitive.ps1",
+    "check:sensitive:staged": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/check-sensitive.ps1 -Cached",
+    "check:sensitive:selftest": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/check-sensitive.ps1 -SelfTest"
   },
   "dependencies": {
     "@dcloudio/uni-app": "3.0.0-5020620260917001",
