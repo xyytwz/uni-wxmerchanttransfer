@@ -32,7 +32,7 @@
     "declaration": {
       "ads": "无",
       "data": "插件不采集任何用户数据；调起微信确认收款页面需宿主已配置微信开放平台能力",
-      "permissions": "无新增系统权限；需宿主 module.json5 配置 querySchemes: [\"weixin\"]"
+      "permissions": "无新增系统权限；需宿主 module.json5 配齐两项：module.querySchemes 含 [\"weixin\"]（拉起）、abilities[].skills[].actions 含 \"wxentity.action.open\"（回跳），缺一不可"
     },
     "npmurl": "",
     "darkmode": "x",

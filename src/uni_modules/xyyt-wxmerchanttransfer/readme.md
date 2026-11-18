@@ -4,13 +4,13 @@
 
 官方插件 `uni-requestMerchantTransfer` 目前只实现了 Android/iOS（鸿蒙端为 `-`），本插件补位鸿蒙实现；**调起字段与官方 API 保持一致**，可直接作为鸿蒙分支替换使用。
 
-微信回跳的 `Want` 由插件内部通过 `UTSHarmony` 生命周期钩子自动接管，**宿主无需修改任何原生代码**（只需配置 `querySchemes`）。
+微信回跳的 `Want` 由插件内部通过 `UTSHarmony` 生命周期钩子自动接管，**宿主无需修改任何原生代码**，但必须在 `module.json5` 声明**两项**配置（`querySchemes` + `wxentity.action.open`，缺一不可，见 2.2）。
 
 原理：HBuilderX 生成的鸿蒙 `EntryAbility` 继承运行时 `UniEntryAbility`，其 `onCreate` / `onNewWant` 内部会向 `appAbilityEmitter` 发出 `create` / `newWant` 事件，而 `UTSHarmony.onAppAbilityCreate` / `onAppAbilityNewWant` 订阅的正是这两个事件，因此插件必然能收到回跳 Want。注意鸿蒙平台只有「发行 → App-Harmony-本地打包」，**不存在云打包**。
 
 > 已验证环境：uni-app（vue3）+ 自定义原生壳工程（DevEco Studio）+ `@tencent/wechat_open_sdk@1.0.23` + HarmonyOS NEXT 真机 + 微信客户端 8.0.x。
 >
-> 配套博文《补上缺失的拼图：为 uni-app 鸿蒙端实现微信“商家转账确认收款”插件》（可行性分析 / 宿主转发方案 / 踩坑记录）：即将发布于掘金与博客园，链接将在后续版本补充。
+> 2026-11-18 已在独立 uni-app cli 工程真机跑通全链路：调起确认收款页 → 用户在微信侧取消回跳 → 宿主原生零改动、插件 `UTSHarmony` 钩子接管成功 → `onMerchantTransferResult` 与 `getLastMerchantTransferResult()` 均返回 `{"result":"cancel"}`。
 
 ---
 
@@ -33,7 +33,8 @@
 
 环境要求：
 
-- HBuilderX ≥ 4.31（插件依赖 `UTSHarmony` 生命周期钩子，官方标注 uni-app HarmonyOS UTS 插件自 4.31 支持），uni-app vue3 工程
+- **uni-app 编译工具链 / HBuilderX ≥ 4.31**：插件依赖 `UTSHarmony.onAppAbilityCreate` / `onAppAbilityNewWant`，其版本门槛来自 `@dcloudio/uni-app-runtime` 包内 `src/main/ets/uni-mp-sdk/types/UTSHarmony.d.ts` 的 `@uniPlatform` 标注 `harmony: { uniUtsPlugin: "4.31", uniVer: "4.31" }`（即 uni-app 而非仅 uni-app x 的鸿蒙 UTS 插件自 4.31 起支持）。低于此版本钩子装不上，表现为「调起正常、确认结果永远取不到」。
+- uni-app vue3 工程
 - 微信客户端 ≥ 8.0.11.34（低于此版本无法拉起确认收款页面）
 - 微信开放平台已为宿主 App 配置鸿蒙平台（Bundle ID + appIdentifier），AppID 与调起参数 `appId` 一致
 
@@ -54,21 +55,48 @@
   3. `entry/oh-package.json5` 加入本地模块依赖（形如 `"@uni_modules/xyyt-wxmerchanttransfer": "file:../xyyt_wxmerchanttransfer"`）；
   4. 在**参与 ArkTS 编译**的 `entry/src/main/ets/uni_modules/index.generated.ets` 补 `import` 与 `uni.registerUTSPlugin`（`www` 下的同名文件只是资源，不参与编译）。缺这一步时运行时 `uni.requireUTSPlugin` 返回 undefined。
 
-### 2.2 宿主 module.json5 配置 querySchemes（必须，且是唯一必需的宿主配置）
+### 2.2 宿主 module.json5 配置（必须两项，缺一不可）
 
-微信回跳宿主依赖 scheme 白名单。在你的鸿蒙原生工程 `entry/src/main/module.json5` 的 `module` 节点中配置：
+微信的「拉起」和「回跳」是两条独立通道，各自需要一个声明。**只配一项时故障现象完全不同，且第二项缺失不会有任何报错提示**：
+
+| 配置项 | 位置 | 作用 | 缺失时的表现 |
+|---|---|---|---|
+| `querySchemes: ["weixin"]` | `module` 节点 | 允许 `bundleManager.canOpenLink("weixin://")` 查询 | `@tencent/wechat_open_sdk` 的 `isWXAppInstalled()` 抛 BusinessError **17700056** 并被内部吞成 `false`（设备其实装了微信）。插件会自己再调一次 `canOpenLink` 分流成因，此时 `fail` 回的是「宿主 querySchemes 未配置」并直接给出修改位置，不会误导用户去装微信 |
+| `actions` 含 `wxentity.action.open` | `module.abilities[].skills` | 让微信确认收款后的回跳 `Want` 能路由回宿主 Ability | **拉起完全正常**（确认收款页照样打开），但结果取不到：`onMerchantTransferResult` 不触发、`getLastMerchantTransferResult()` 恒为 `null` |
+
+在 `entry/src/main/module.json5` 中按下面的**层级**配置（注意 `actions` 不在 `module` 下，必须嵌在 `abilities[].skills[]` 内）：
 
 ```json5
 {
   "module": {
     // ...
     "querySchemes": ["weixin"],
-    "actions": ["action.system.home", "wxentity.action.open"]
+    "abilities": [
+      {
+        "name": "EntryAbility",
+        // ...
+        "skills": [
+          {
+            "entities": ["entity.system.home"],
+            "actions": ["action.system.home", "wxentity.action.open"]
+          }
+        ]
+      }
+    ]
   }
 }
 ```
 
-> uni-app HBuilderX 默认生成的鸿蒙壳工程同样如此：找到生成的 `entry/src/main/module.json5` 添加（或通过 harmony-configs 覆盖）。
+> 早期版本文档把 `actions` 与 `querySchemes` 平级写在 `module` 节点下，是错的 —— 照抄不会生成预期的 intent 过滤，回跳同样收不到。若你已按旧片段配置过，请重新核对层级。
+
+#### 两类工程的落地方式
+
+`manifest.json` 里没有任何开关能生成这两项，只能落到原生 `module.json5`；区别在于改哪一份、改完会不会被后续构建冲掉：
+
+- **HBuilderX 工程（发行 → App-Harmony-本地打包）**：`module.json5` 属于打包生成的中间产物，直接改容易被重新生成覆盖。建议通过项目根目录 `harmony-configs/` 提供**完整的** `module.json5` 覆盖（该目录内文件是原样整体覆盖，不能只给片段）；注意 `manifest.json` 中的鸿蒙配置优先级高于 `harmony-configs`。
+- **uni-app cli 工程 / 自维护原生权威工程**（配套 demo 与多数离线打包工程属此类）：`entry/src/main/module.json5` 是长期存在的源文件，直接编辑即可。但如果你的构建脚本会用模板重新生成整个 `entry` 目录，请把这两项写进模板、或在脚本里加一步 patch，否则改动会被下一次构建冲掉。
+
+**改完必须重新构建并安装 HAP 才生效**：`module.json5` 编译进 HAP，WGT 热更新、替换 `www` 目录都不起作用。落地后建议做产物级确认 —— 解包 HAP 检查其中的 `module.json` 是否真的带上了 `querySchemes` 与 `wxentity.action.open`，不要只看源文件。
 
 ### 2.3 微信回跳 Want 的接收（插件自动完成，无需改原生）
 
@@ -192,7 +220,7 @@ const timer = setInterval(() => {
 | subAppId | string | 否 | 服务商模式：子商户 appid |
 | subMchId | string | 否 | 服务商模式：子商户号 |
 | success | callback | 否 | 调起成功（页面拉起意图已发出） |
-| fail | callback | 否 | 调起失败（未安装微信/版本过低/参数缺失/发送失败） |
+| fail | callback | 否 | 调起失败（参数缺失 / querySchemes 未配置 / 未安装微信或版本过低 / 发送失败） |
 | complete | callback | 否 | 结束回调 |
 
 回调结果：`{ errMsg: string }`，`success` 时为 `requestMerchantTransfer:ok`。
@@ -230,10 +258,12 @@ const timer = setInterval(() => {
 
 ## 五、Demo
 
-仓库根本身就是 uni-app cli demo 工程（vue3）：`src/pages/index/index.vue` 演示完整流程（参数输入 → 调起 → 结果回调与轮询展示），插件源码位于 `src/uni_modules/xyyt-wxmerchanttransfer/`。真机验证只需按 2.1、2.2 完成（插件自动接管 Want，无需改原生）。
+配套 demo 工程（uni-app cli，vue3）以 `src/pages/index/index.vue` 演示完整流程（参数输入 → 调起 → 结果回调与轮询展示），插件源码位于 `src/uni_modules/xyyt-wxmerchanttransfer/`。真机验证只需按 2.1、2.2 完成（插件自动接管 Want，无需改原生）；2.2 的两项配置少一项就会出现「拉得起但取不到结果」或「报未能拉起微信（并提示 querySchemes 未配置）」，建议按该节末尾的产物级方式先确认再上机。
 
 ## 六、已知限制
 
 - 仅鸿蒙端生效；Android/iOS 请用官方插件（本插件不重复实现）。
-- 结果回传依赖微信回跳 `Want` 被成功分发：常规场景由插件内部 UTSHarmony 钩子自动完成；若插件未被前端静态引用（注意事项 7）或宿主 HBuilderX 低于 4.31，钩子装不上，此时调起可发起但收不到确认结果，需升级 HBuilderX 或按 2.4 手工转发。
-- 钩子自动接管与冷启动暂存补投两个机制目前仅在工程与编译层验证，尚无真机结论；若你的场景发回跳异常，请先用 `getLastMerchantTransferResult` 轮询定位。
+- 结果回传依赖微信回跳 `Want` 被成功分发，**且依赖 `module.json5` 的 `wxentity.action.open`**（见 2.2）：缺该 action 时拉起不受任何影响，但回跳 Want 路由不回宿主，结果恒为空。
+- 常规场景由插件内部 UTSHarmony 钩子自动接管；若插件未被前端静态引用（注意事项 7）或宿主 uni-app 编译工具链低于 4.31，钩子装不上，此时调起可发起但收不到确认结果，需升级工具链或按 2.4 手工转发。
+- 已获真机结论的机制：`onAppAbilityNewWant`（应用存活时回跳）+ 一次性回调 + 轮询读取，2026-11-18 独立插件工程真机返回 `{"result":"cancel"}`。
+- **尚无真机结论的机制**：`onAppAbilityCreate` 冷启动回跳与「暂存 Want 后续自动补投」，目前仅有工程与编译层证据。若你的场景回跳异常，先用 `getLastMerchantTransferResult()` 轮询定位，并核对 2.2 的两项配置。

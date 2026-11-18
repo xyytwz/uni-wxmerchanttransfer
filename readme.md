@@ -6,7 +6,7 @@ uni-app **鸿蒙端（HarmonyOS NEXT）微信商家转账用户确认收款** UT
 
 补位官方 `uni-requestMerchantTransfer` 缺失的 HarmonyOS 实现（该官方插件至今只有 Android/iOS，`arkts: false`）：调起微信确认收款页面（`requestMerchantTransfer`），并回传用户确认结果（`success` / `fail` / `cancel`）。调起字段与官方 API 完全一致，可直接作为鸿蒙分支替换使用。
 
-> 关键机制：插件加载时用官方 `UTSHarmony.onAppAbilityCreate` / `onAppAbilityNewWant`（兼容性标注：uni-app HarmonyOS UTS 插件 ≥ 4.31）监听宿主 `EntryAbility` 生命周期，**自行接管微信回跳的 `Want`**，因此宿主无需修改任何原生代码。原理：HBuilderX 生成的鸿蒙 `EntryAbility` 继承运行时 `UniEntryAbility`，其 `onCreate` / `onNewWant` 会向 `appAbilityEmitter` 发出 `create` / `newWant` 事件，而 `UTSHarmony.onAppAbility*` 订阅的正是这两个事件（注：鸿蒙平台只有本地打包，不存在云打包）。唯一必需的宿主配置是 `module.json5` 的 `querySchemes: ["weixin"]`。
+> 关键机制：插件加载时用官方 `UTSHarmony.onAppAbilityCreate` / `onAppAbilityNewWant`（版本门槛：`@dcloudio/uni-app-runtime` 内 `UTSHarmony.d.ts` 标注 `harmony.uniUtsPlugin: "4.31"`，即 uni-app 鸿蒙 UTS 插件 ≥ 4.31）监听宿主 `EntryAbility` 生命周期，**自行接管微信回跳的 `Want`**，因此宿主无需修改任何原生代码。原理：HBuilderX 生成的鸿蒙 `EntryAbility` 继承运行时 `UniEntryAbility`，其 `onCreate` / `onNewWant` 会向 `appAbilityEmitter` 发出 `create` / `newWant` 事件，而 `UTSHarmony.onAppAbility*` 订阅的正是这两个事件（注：鸿蒙平台只有本地打包，不存在云打包）。但宿主仍**必须在 `module.json5` 配齐两项**：`querySchemes: ["weixin"]` 管拉起、`wxentity.action.open` 管回跳，缺一不可（见下节）。
 
 - 插件本体与完整集成文档：[`src/uni_modules/xyyt-wxmerchanttransfer`](src/uni_modules/xyyt-wxmerchanttransfer)（上传 DCloud 插件市场时打包此目录）
 - 插件市场：即将上架 DCloud 插件市场（ext.dcloud.net.cn），上架后在此回填链接
@@ -19,6 +19,7 @@ uni-app **鸿蒙端（HarmonyOS NEXT）微信商家转账用户确认收款** UT
 | `src/uni_modules/xyyt-wxmerchanttransfer/` | **插件本体（唯一权威源）**：`package.json` / `readme.md` / `changelog.md` / `utssdk/` / `native-integration/` |
 | `src/pages/index/index.vue` | demo 页：参数输入 → 调起 → 一次性回调与轮询结果展示 |
 | `blog/` | 配套技术博文源稿（可行性分析 / 方案设计 / 踩坑记录） |
+| `scripts/check-sensitive.ps1` | 发布前脱敏自检（见下方「发布前检查」） |
 | 根 `package.json` / `vite.config.ts` | uni-app cli 工程（vue3）——本仓库同时就是插件的 demo 工程 |
 
 ## 跑 demo
@@ -28,18 +29,35 @@ npm install
 npm run dev:app-harmony     # 或 npx uni build -p app-harmony，再导入 HBuilderX / DevEco Studio
 ```
 
-## 宿主配置：只有一项
+## 宿主配置：module.json5 两项，缺一不可
 
-`entry/src/main/module.json5` 的 `module` 节点内加 scheme 白名单（微信回跳宿主的前提）：
+微信的「拉起」与「回跳」分属两条通道，各需一个声明。**注意两项在 JSON 里的层级不同**：`querySchemes` 在 `module` 节点下，`actions` 必须嵌在 `abilities[].skills[]` 内。
 
 ```json5
 {
   "module": {
     "querySchemes": ["weixin"],
-    "actions": ["action.system.home", "wxentity.action.open"]
+    "abilities": [
+      {
+        "name": "EntryAbility",
+        "skills": [
+          {
+            "entities": ["entity.system.home"],
+            "actions": ["action.system.home", "wxentity.action.open"]
+          }
+        ]
+      }
+    ]
   }
 }
 ```
+
+| 缺哪一项 | 现象 |
+|---|---|
+| `querySchemes` | 报「未安装微信或微信版本过低」（实为 `canOpenLink` 抛 17700056 被 SDK 吞成 false） |
+| `wxentity.action.open` | **拉起一切正常**，但确认结果永远取不到（回调不触发、轮询恒为 `null`） |
+
+两项均编译进 HAP，**改完必须重新构建并安装**，WGT 热更新与替换 `www` 无效；建议解包 HAP 确认已生效。工程形态上的落地差异（HBuilderX 工程走 `harmony-configs/` 整体覆盖，cli / 自维护工程直接改源文件并注意构建脚本是否会重新生成）见插件 [`readme.md` 2.2`](src/uni_modules/xyyt-wxmerchanttransfer/readme.md)。
 
 **不需要改 `EntryAbility`**：Want 接管已由插件内部钩子完成。
 
@@ -108,7 +126,48 @@ requestMerchantTransfer({
 | `uni build -p app-harmony` | ✅ 通过；cli 阶段即完成 `uts → ets` 编译（ArkTS 语法有效性同步验证），并自动生成插件注册代码 |
 | H5 交叉构建与隔离 | ✅ 通过；插件代码不出现在非鸿蒙端产物 |
 | 真机链路（原生直连 / 宿主转发路径） | ✅ HarmonyOS NEXT + 微信 8.0.x：点领取 → 拉起微信确认收款 → 确认后回跳 → 结果回调 → 列表刷新（在主工程自定义原生壳内以原生代码直连验证，等价于 `handleWeChatWant` 路径） |
-| `UTSHarmony` 自动接管（本版本主推路径） | ⚠️ 编译层已确认：生成的 ArkTS 正确 `import { UTSHarmony } from "@dcloudio/uni-app-runtime"` 并调用两个钩子、顶层完成安装；**HBuilderX + 真机验证待完成** |
+| `UTSHarmony` 自动接管（本版本主推路径） | ✅ 2026-11-18 独立插件工程（uni-app cli + demo）真机闭环：宿主原生零改动，调起确认收款页 → 微信侧取消回跳 → `onMerchantTransferResult` 与 `getLastMerchantTransferResult()` 均返回 `{"result":"cancel"}`（走 `onAppAbilityNewWant`） |
+| `onAppAbilityCreate` 冷启动回跳 / 暂存补投 | ⚠️ 仅有工程与编译层证据，**尚无真机结论** |
+
+## 发布前检查（脱敏）
+
+HBuilderX 会把你本机的鸿蒙签名材料静默写进 `src/manifest.json`：`app-harmony.distribute.bundleName` 改成真实包名、`appid` 填上真实 DCloud 标识，并新增一整块 `signingConfigs`（`certpath` / `profile` / `storeFile` / `keyPassword` / `storePassword`，全是本机绝对路径）。它看起来只是普通配置改动，特别容易被顺手提交。
+
+发布 / 推代码前跑一次：
+
+```bash
+npm run check:sensitive          # 扫工作区已跟踪文件
+npm run check:sensitive:staged   # 扫 git 索引（可挂 pre-commit）
+npm run check:sensitive:selftest # 断言每条规则都能命中自己的样本（改过规则就跑一次）
+```
+
+准备上传插件市场时，直接扫将要压缩的那个目录（未跟踪、被 gitignore 的文件也一起扫）：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/check-sensitive.ps1 -Paths src/uni_modules/xyyt-wxmerchanttransfer
+```
+
+`-Paths` 用逗号分隔多项；任一路径不存在时脚本以退出码 2 直接报错，**不会**因为“没扫到东西”而假装通过——这条是踩坑后加的：git grep 拿到一个不存在的 pathspec 时返回 1（无匹配），旧版本据此报过 clean。
+
+规则只匹配**形态**（签名配置键名、证书目录、`__UNI__xxxxxxxx`、`wx` + 16 位十六进制、绝对用户目录、长 base64 串），脚本本身不含任何公司值。你公司自己的包名前缀 / 商户号 / 微信 AppID 请写进一个不入库的本地清单，用 `-PatternsFile <path>` 传进去：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/check-sensitive.ps1 -PatternsFile ../my-deny.txt
+```
+
+命中时先还原被工具改写的文件，再复扫：
+
+```bash
+git restore src/manifest.json
+npm run check:sensitive
+```
+
+另外：
+
+- 上传 DCloud 插件市场只打包 `src/uni_modules/xyyt-wxmerchanttransfer`，不要压缩整个仓库。
+- 运行时日志同样属于“脱敏”范围：`index.uts` 组装的 query 里含 `package_info`（一次性转账单据令牌）与 `openId`（用户标识），已被降级为只打印可选字段的键名，不打印取值。自行加日志时请沿用这条约束。
+- `dist/` 与 `unpackage/` 虽已 gitignore，但里面的 hvigor 构建日志会记录本机用户名与历史签名路径，打包前建议直接删掉（下次构建自动重建）。
+- 想让 `src/manifest.json` 从此不再进提交视野：`git update-index --skip-worktree src/manifest.json`（仅本地生效；恢复跟踪用 `--no-skip-worktree`）。
 
 ## 许可
 
